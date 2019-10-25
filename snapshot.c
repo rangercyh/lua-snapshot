@@ -256,6 +256,40 @@ mark_function(lua_State *L, lua_State *dL, const void * parent, const char *desc
 	}
 }
 
+static const char*
+lua_getlocal_with_line(lua_State *L, lua_Debug *ar, int n) {
+	const char* name = lua_getlocal(L, ar, n);
+	if(!name) {
+		return NULL;
+	}
+	struct CallInfo* ci = ar->i_ci;
+	if(!ttisLclosure(ci->func)) {
+		return name;
+	}
+
+	const Instruction* savedpc = ci->u.l.savedpc;
+	LClosure *cl = clLvalue(ci->func);
+	struct Proto* f = cl->p;
+	Instruction* code = f->code;
+	int pc =  savedpc - code - 1;
+	int i;
+
+	for (i = 0; i<f->sizelocvars && f->locvars[i].startpc <= pc; i++) {
+		if (pc < f->locvars[i].endpc) {
+			n--;
+			if(n==0) {
+				int startpc = f->locvars[i].startpc;
+				int line = f->lineinfo[startpc-1];
+				ar->linedefined = line;
+				// printf("lua_getlocal_with_line name:%s startpc:%d line:%d pc:%d\n", name, startpc, line, pc);
+				break;
+			}
+		}
+	}
+	return name;
+}
+
+
 static void
 mark_thread(lua_State *L, lua_State *dL, const void * parent, const char *desc) {
 	const void * t = readobject(L, dL, parent, desc);
@@ -293,7 +327,7 @@ mark_thread(lua_State *L, lua_State *dL, const void * parent, const char *desc) 
 		int i,j;
 		for (j=1;j>-1;j-=2) {
 			for (i=j;;i+=j) {
-				const char * name = lua_getlocal(cL, &ar, i);
+				const char * name = lua_getlocal_with_line(cL, &ar, i);
 				if (name == NULL)
 					break;
 				snprintf(tmp, sizeof(tmp), "%s{#%s:%d}",name,ar.short_src,ar.linedefined);
