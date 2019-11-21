@@ -81,7 +81,8 @@ is_lightcfunction(lua_State *L, int idx) {
 #define SOURCE 3
 #define THREAD 4
 #define USERDATA 5
-#define MARK 6
+#define STRING 6
+#define MARK 7
 
 static bool
 ismarked(lua_State *dL, const void *p) {
@@ -117,12 +118,17 @@ readobject(lua_State *L, lua_State *dL, const void *parent, const char *desc) {
 	case LUA_TUSERDATA:
 		tidx = USERDATA;
 		break;
+#ifdef DUMP_STRING
+	case LUA_TSTRING:
+		tidx = STRING;
+		break;
+#endif
 	default:
 		lua_pop(L, 1);
 		return NULL;
 	}
-
-	const void * p = lua_topointer(L, -1);
+	const void * p = (t == LUA_TSTRING)?(lua_tostring(L, -1)):(lua_topointer(L, -1));
+	// const void * p = lua_topointer(L, -1);
 	if (ismarked(dL, p)) {
 		lua_rawgetp(dL, tidx, p);
 		if (!lua_isnil(dL,-1)) {
@@ -207,6 +213,15 @@ mark_table(lua_State *L, lua_State *dL, const void * parent, const char * desc) 
 
 	lua_pop(L,1);
 }
+
+static void
+mark_string(lua_State *L, lua_State *dL, const void * parent, const char *desc) {
+	const void* t = readobject(L, dL, parent, desc);
+	if(t == NULL)
+		return;
+	lua_pop(L,1);
+}
+
 
 static void
 mark_userdata(lua_State *L, lua_State *dL, const void * parent, const char *desc) {
@@ -324,6 +339,9 @@ mark_object(lua_State *L, lua_State *dL, const void * parent, const char *desc) 
 		break;
 	case LUA_TTHREAD:
 		mark_thread(L, dL, parent, desc);
+		break;
+	case LUA_TSTRING:
+		mark_string(L, dL, parent, desc);
 		break;
 	default:
 		lua_pop(L,1);
@@ -460,6 +478,16 @@ pdesc(lua_State *L, lua_State *dL, int idx, const char * typename) {
 				luaL_addchar(&b,'\n');
 			}break;
 
+			case STRING: {
+				TString* ts = (TString*)(((char*)key) - sizeof(UTString));
+				size = tsslen(ts);
+				snprintf(buff_sz, sizeof(buff_sz), "{%zd}", size);
+				luaL_addstring(&b, typename);
+				luaL_addchar(&b,' ');
+				luaL_addstring(&b, buff_sz);
+				luaL_addchar(&b,'\n');
+			}break;
+
 			default: {
 				snprintf(buff_sz, sizeof(buff_sz), "{0}");
 				luaL_addstring(&b, typename);
@@ -488,11 +516,13 @@ gen_result(lua_State *L, lua_State *dL) {
 	count += count_table(dL, FUNCTION);
 	count += count_table(dL, USERDATA);
 	count += count_table(dL, THREAD);
+	count += count_table(dL, STRING);
 	lua_createtable(L, 0, count);
 	pdesc(L, dL, TABLE, "table");
 	pdesc(L, dL, USERDATA, "userdata");
 	pdesc(L, dL, FUNCTION, "function");
 	pdesc(L, dL, THREAD, "thread");
+	pdesc(L, dL, STRING, "string");
 }
 
 static int
